@@ -379,7 +379,7 @@ class Model:
         return self.oseries.loc[tmin: tmax]
 
     def initialize(self, tmin=None, tmax=None, freq=None, warmup=None,
-                   noise=None, weights=None, initial=True):
+                   noise=None, weights=None, initial=True, fit_constant=True):
         """Initialize the model. This method is called by the solve
         method but can also be triggered manually.
 
@@ -417,6 +417,20 @@ class Model:
                                                 self.settings["freq"],
                                                 self.settings["warmup"])
 
+        # Initialize parameters
+        self.parameters = self.get_init_parameters(noise, initial)
+
+        # Prepare model if not fitting the constant as a parameter
+        if fit_constant is False:
+            norm = "mean"
+            self.parameters.loc["constant_d", "vary"] = 0
+            self.parameters.loc["constant_d", "initial"] = 0.0
+            self.oseries.update_series(norm=norm)
+        else:
+            norm = None
+            self.parameters.loc["constant_d", "vary"] = 1
+            self.oseries.update_series(norm=norm)
+
         self.oseries_calib = self.get_oseries_calib(self.settings["tmin"],
                                                     self.settings["tmax"],
                                                     self.sim_index)
@@ -432,12 +446,9 @@ class Model:
             self.logger.info('There are observations between the simulation'
                              'timesteps. Linear interpolation is used')
 
-        # Initialize parameters
-        self.parameters = self.get_init_parameters(noise, initial)
-
     def solve(self, tmin=None, tmax=None, solver=LmfitSolve, report=True,
-              noise=True, initial=True, weights=None, freq=None, warmup=None,
-              **kwargs):
+              noise=True, initial=True, weights=None, freq=None,
+              warmup=None, fit_constant=True, **kwargs):
         """Method to solve the time series model.
 
         Parameters
@@ -464,7 +475,8 @@ class Model:
         """
 
         # Initialize the model
-        self.initialize(tmin, tmax, freq, warmup, noise, weights, initial)
+        self.initialize(tmin, tmax, freq, warmup, noise, weights, initial,
+                        fit_constant)
         self.settings["solver"] = solver._name
 
         # Solve model
@@ -474,13 +486,18 @@ class Model:
                           freq=self.settings["freq"],
                           weights=self.settings["weights"], **kwargs)
 
+        self.parameters.optimal = self.fit.optimal_params
+        self.parameters.stderr = self.fit.stderr
+
+        if fit_constant is False:
+            self.oseries.update_series(norm=None)
+            self.parameters.loc["constant_d", "optimal"] = \
+                self.observations().mean() - self.simulate().mean()
+
         # make calibration data empty again (was set in initialize)
         self.sim_index = None
         self.oseries_calib = None
         self.interpolate_simulation = None
-
-        self.parameters.optimal = self.fit.optimal_params
-        self.parameters.stderr = self.fit.stderr
 
         if report:
             print(self.fit_report())
