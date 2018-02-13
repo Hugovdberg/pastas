@@ -16,7 +16,7 @@ from .noisemodels import NoiseModel
 from .plots import Plotting
 from .solver import LmfitSolve
 from .stats import Statistics
-from .stressmodels import Constant
+from .stressmodels import Constant, Constant2
 from .timeseries import TimeSeries
 from .utils import get_dt, get_time_offset
 from .version import __version__
@@ -258,8 +258,13 @@ class Model:
             h = h.add(c, fill_value=0.0)
             istart += ts.nparam
         if self.constant:
-            h = h + self.constant.simulate(parameters[istart])
-            istart += 1
+            if isinstance(self.constant, Constant2):
+                res = self.subtract_from_observations(h, tmin, tmax, freq)
+                self.constant.value = res.mean()
+                h = h + self.constant.value
+            else:
+                h = h + self.constant.simulate(parameters[istart])
+                istart += 1
         if self.transform:
             h = self.transform.simulate(h, parameters[istart:istart + self.transform.nparam])
         h.name = "Simulation"
@@ -289,6 +294,17 @@ class Model:
 
         # simulate model
         simulation = self.simulate(parameters, tmin, tmax, freq)
+
+        # determine residuals
+        res = self.subtract_from_observations(simulation, tmin, tmax, freq)
+
+        if np.isnan(sum(res ** 2)):  # quick and dirty check
+            self.logger.warning('nan problem in residuals')
+        res.name = "Residuals"
+        res.index.name = "Date"
+        return res
+
+    def subtract_from_observations(self, simulation, tmin, tmax, freq):
         if self.oseries_calib is None:
             tmin, tmax = self.get_tmin_tmax(tmin, tmax, freq, use_oseries=True)
             oseries_calib = self.get_oseries_calib(tmin, tmax,
@@ -310,13 +326,7 @@ class Model:
         else:
             # all of the observation indexes are in the simulation
             h_simulated = simulation[obs_index]
-        res = oseries_calib - h_simulated
-
-        if np.isnan(sum(res ** 2)):  # quick and dirty check
-            self.logger.warning('nan problem in residuals')
-        res.name = "Residuals"
-        res.index.name = "Date"
-        return res
+        return oseries_calib - h_simulated
 
     def innovations(self, parameters=None, tmin=None, tmax=None, freq=None):
         """Method to simulate the innovations when a noisemodel is present.
