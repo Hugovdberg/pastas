@@ -364,7 +364,7 @@ class Project:
             ml.oseries_calib = None
 
     def solve_models(self, mls=None, report=False, ignore_solve_errors=False,
-                     verbose=False, tmin=None, tmax=None, **kwargs):
+                     verbose=False, **kwargs):
         """Solves the models in mls
 
         mls: list of str, optional
@@ -396,23 +396,20 @@ class Project:
 
             ml = self.models[ml_name]
 
-            # get tmin/tmax if provided
-            if isinstance(tmin, pd.Series):
-                m_tmin = pd.Timestamp(tmin.loc[ml_name])
-            elif tmin is None:
-                m_tmin = None
+            # Set model arguments
+            m_kwargs = {}
+            for key, value in kwargs.items():
+                if isinstance(value, pd.Series) and ml_name in value.index:
+                    m_kwargs[key] = value.loc[ml_name]
             else:
-                m_tmin = pd.Timestamp(tmin)
-
-            if isinstance(tmax, pd.Series):
-                m_tmax = pd.Timestamp(tmax.loc[ml_name])
-            elif tmax is None:
-                m_tmax = None
-            else:
-                m_tmax = pd.Timestamp(tmax)
+                    m_kwargs[key] = value
+            # Convert timestamps
+            for tstamp in ["tmin", "tmax"]:
+                if tstamp in m_kwargs and m_kwargs[tstamp]:
+                    m_kwargs[tstamp] = pd.Timestamp(m_kwargs[tstamp])
 
             try:
-                ml.solve(tmin=m_tmin, tmax=m_tmax, report=report, **kwargs)
+                ml.solve(report=report, **m_kwargs)
             except Exception as e:
                 if ignore_solve_errors:
                     warning = "solve error ignored for -> {}".format(ml.name)
